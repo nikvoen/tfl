@@ -1,55 +1,74 @@
 import requests
 
 
+def export_to_json(table):
+    main_prefixes = ["e"] + table.S[1:table.extended_table].tolist()
+    non_main_prefixes = table.S[table.extended_table:].tolist()
+    suffixes = ["e"] + table.E[1:].tolist()
+
+    table_values = [str(value) for row in table._T.values() for value in row]
+    table_str = "".join(table_values)
+
+    data = {
+        "main_prefixes": " ".join(main_prefixes),
+        "complementary_prefixes": " ".join(non_main_prefixes),
+        "suffixes": " ".join(suffixes),
+        "table": table_str
+    }
+
+    return data
+
+
+def create_maze(width, height, walls, exits):
+    url = "http://localhost:8080/generate_graph"
+    data = {
+        "width": width,
+        "height": height,
+        "pr_of_break_wall": walls,
+        "num_of_finish_edge": exits
+    }
+
+    response = requests.post(url, json=data)
+
+    if response.status_code == 200:
+        return True
+    else:
+        print("Error sending maze data:", response.status_code)
+        return False
+
+
 # Отправка всей таблицы
 def check_equivalence(table):
-    def export_to_json(table):
-        main_prefixes = ["ε"] + table.S[1:table.extended_table].tolist()
-        non_main_prefixes = table.S[table.extended_table:].tolist()
-        suffixes = ["ε"] + table.E[1:].tolist()
-
-        table_values = [str(value) for row in table._T.values() for value in row]
-        table_str = " ".join(table_values)
-
-        data = {
-            "main_prefixes": " ".join(main_prefixes),
-            "non_main_prefixes": " ".join(non_main_prefixes),
-            "suffixes": " ".join(suffixes),
-            "table": table_str
-        }
-
-        return data
-
-    url = "http://127.0.0.1:8095/checkTable"
+    url = "http://localhost:8080/check_table"
     table_json = export_to_json(table)
     response = requests.post(url, json=table_json)
 
     if response.status_code == 200:
-        get = response.json()['response']
-        if get is not None:
-            print(f'Сounterexample: {get}')
-            return get
+        print(table_json)
+        answer = response.text
+
+        if answer != "true":
+            print(f'Сounterexample: {answer}')
+            print(table)
+            return answer
         else:
             print('Win')
             print(table)
-            return "null"
+            return answer
     else:
-        print("Ошибка при отправке таблицы", response.status_code)
+        print("Error sending table:", response.status_code)
         print(table_json)
 
 
 # Отправка слова
-def check_membership(presuf):
-    url = "http://127.0.0.1:8095/checkWord"
-    data = {
-        "word": presuf
-    }
-    response = requests.post(url, json=data)
+def check_membership(string):
+    url = "http://localhost:8080/check_membership"
+    headers = {"Content-Type": "application/json"}
+    response = requests.post(url, data=string, headers=headers)
 
     if response.status_code == 200:
-        json_response = response.json()['response']
-        return json_response
+        # print(f"word<{string}>{response.content}")
+        return int(response.content)
     else:
-        print("Ошибка при отправке строки:", response.status_code)
-
+        print("Error sending word:", response.status_code)
     return ""
