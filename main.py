@@ -78,7 +78,7 @@ class ObservationTable:
         return tabulate(output_table, headers="firstrow", tablefmt="github")
 
 
-alphabet = list("LR")
+alphabet = list("EWNS")
 table = ObservationTable(alphabet)
 table.compare()
 
