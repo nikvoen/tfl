@@ -1,20 +1,16 @@
-import numpy as np
 import requests
 
 
 # Отправка всей таблицы
 def check_equivalence(table):
     def export_to_json(table):
-        # Определяем части таблицы
-        main_prefixes = ["ε"] + table.S[:table.extended_table].tolist()
+        main_prefixes = ["ε"] + table.S[1:table.extended_table].tolist()
         non_main_prefixes = table.S[table.extended_table:].tolist()
-        suffixes = ["ε"] + table.E.tolist()
+        suffixes = ["ε"] + table.E[1:].tolist()
 
-        # Объединяем значения таблицы T построчно
         table_values = [str(value) for row in table._T.values() for value in row]
         table_str = " ".join(table_values)
 
-        # Структура для JSON
         data = {
             "main_prefixes": " ".join(main_prefixes),
             "non_main_prefixes": " ".join(non_main_prefixes),
@@ -31,20 +27,22 @@ def check_equivalence(table):
     if response.status_code == 200:
         get = response.json()['response']
         if get is not None:
-            print('!!!!COUNTEREXAMPLE!!!!!')
+            print(f'Сounterexample: {get}')
             return get
         else:
-            print('!!!!!WIN!!!!!')
+            print('Win')
+            print(table)
             return "null"
     else:
         print("Ошибка при отправке таблицы", response.status_code)
+        print(table_json)
 
 
 # Отправка слова
-def check_membership(string):
+def check_membership(presuf):
     url = "http://127.0.0.1:8095/checkWord"
     data = {
-        "word": string
+        "word": presuf
     }
     response = requests.post(url, json=data)
 
@@ -52,6 +50,6 @@ def check_membership(string):
         json_response = response.json()['response']
         return json_response
     else:
-        print('Ошибка при отправке строки:', response.status_code)
+        print("Ошибка при отправке строки:", response.status_code)
 
     return ""
