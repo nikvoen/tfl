@@ -1,3 +1,4 @@
+import requests
 from tabulate import tabulate
 import numpy as np
 from service import create_maze, check_membership, check_equivalence
@@ -32,9 +33,6 @@ class ObservationTable:
         self._T[len(self.S) - 1] = new_row.copy()
 
     def extend_table(self):
-        print("extend_table")
-        print(self)
-
         while self.pointer < self.extended_table:
             for letter in self.A:
                 self.add_prefix(self.S[self.pointer] + letter)
@@ -43,8 +41,6 @@ class ObservationTable:
 
     # Проверка на полноту
     def compare(self):
-        print("compare")
-        print(self)
         i = self.extended_table
 
         while i < len(self.S):
@@ -86,23 +82,15 @@ class ObservationTable:
 
 if __name__ == '__main__':
     alphabet = list("EWNS")
-    create_maze(2, 2, 1, 1)
+    create_maze(2, 4, 2, 1)
     table = ObservationTable(alphabet)
     table.extend_table()
 
-    # Отправляем таблицу в МАТ
+    # Отправление таблицы в МАТ
     response = check_equivalence(table)
 
     while response != "true":
-        print(table)
-        # Добавить контпример в таблицу
-        table.extend_suffixes(response)
-
-        # Проверка на полноту
-        table.compare()
-
-        # Расширение таблицы
-        table.extend_table()
-
-        # Отправляем таблицу в МАТ
+        table.extend_suffixes(response)  # Добавление контпримера в таблицу
+        table.compare()  # Проверка таблицы на полноту
+        table.extend_table()  # Расширение таблицы
         response = check_equivalence(table)
