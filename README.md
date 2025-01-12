@@ -2,4 +2,4 @@
 branch: *fix_network*
 
 #### Lab work #4
-branch: regex
+branch: *regex*
