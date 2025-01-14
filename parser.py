@@ -20,8 +20,8 @@ def tokenize(regex_str):
             continue
 
         if c == '(':
-            if i+1 < n and regex_str[i+1] == '?':
-                if i+2 < n and regex_str[i+2] == ':':
+            if i + 1 < n and regex_str[i + 1] == '?':
+                if i + 2 < n and regex_str[i + 2] == ':':
                     tokens.append(Token('LPAREN', '('))
                     tokens.append(Token('QMARK', '?'))
                     tokens.append(Token('NON_CAPT_GROUP', ':'))
@@ -47,8 +47,8 @@ def tokenize(regex_str):
             i += 1
 
         elif c == '\\':
-            if i+1 < n and regex_str[i+1].isdigit():
-                tokens.append(Token('BACKSLASH_DIGIT', regex_str[i+1]))
+            if i + 1 < n and regex_str[i + 1].isdigit():
+                tokens.append(Token('BACKSLASH_DIGIT', regex_str[i + 1]))
                 i += 2
             else:
                 tokens.append(Token('BACKSLASH', '\\'))
@@ -73,14 +73,12 @@ def tokenize(regex_str):
 class Node:
     pass
 
-
 class CharNode(Node):
     def __init__(self, ch):
         self.ch = ch
 
     def __repr__(self):
         return f"CharNode({self.ch!r})"
-
 
 class ConcatNode(Node):
     def __init__(self, left, right):
@@ -90,7 +88,6 @@ class ConcatNode(Node):
     def __repr__(self):
         return f"ConcatNode({self.left}, {self.right})"
 
-
 class AltNode(Node):
     def __init__(self, left, right):
         self.left = left
@@ -99,14 +96,12 @@ class AltNode(Node):
     def __repr__(self):
         return f"AltNode({self.left}, {self.right})"
 
-
 class StarNode(Node):
     def __init__(self, expr):
         self.expr = expr
 
     def __repr__(self):
         return f"StarNode({self.expr})"
-
 
 class CaptureGroupNode(Node):
     def __init__(self, group_id, expr):
@@ -116,7 +111,6 @@ class CaptureGroupNode(Node):
     def __repr__(self):
         return f"CaptureGroupNode(id={self.group_id}, expr={self.expr})"
 
-
 class NonCaptureGroupNode(Node):
     def __init__(self, expr):
         self.expr = expr
@@ -124,14 +118,12 @@ class NonCaptureGroupNode(Node):
     def __repr__(self):
         return f"NonCaptureGroupNode({self.expr})"
 
-
 class BackRefStringNode(Node):
     def __init__(self, group_id):
         self.group_id = group_id
 
     def __repr__(self):
         return f"BackRefStringNode({self.group_id})"
-
 
 class RecursiveRefNode(Node):
     def __init__(self, group_id):
@@ -162,7 +154,9 @@ class Parser:
     def parse(self):
         node = self.parse_alt()
         if self.current_token().kind != 'END':
-            raise ValueError(f"Лишние символы после окончания парсинга: {self.current_token()}")
+            raise ValueError(
+                f"Лишние символы после окончания парсинга: {self.current_token()}"
+            )
         return node
 
     def parse_alt(self):
@@ -195,7 +189,6 @@ class Parser:
 
         if t.kind == 'LPAREN':
             self.eat('LPAREN')
-
             if self.current_token().kind == 'QMARK':
                 self.eat('QMARK')
                 if self.current_token().kind == 'NON_CAPT_GROUP':
@@ -233,45 +226,96 @@ class Parser:
             raise ValueError(f"Неожиданный токен parse_base(): {t}")
 
 
-def compute_init_sets(node, initalized_in):
-    if isinstance(node, CharNode):
-        return initalized_in
+def build_group_map(root):
+    group_ast = {}
 
-    elif isinstance(node, ConcatNode):
-        mid = compute_init_sets(node.left, initalized_in)
-        return compute_init_sets(node.right, mid)
+    def dfs(node):
+        if isinstance(node, CaptureGroupNode):
+            group_ast[node.group_id] = node.expr
+            dfs(node.expr)
+        elif isinstance(node, ConcatNode):
+            dfs(node.left)
+            dfs(node.right)
+        elif isinstance(node, AltNode):
+            dfs(node.left)
+            dfs(node.right)
+        elif isinstance(node, StarNode):
+            dfs(node.expr)
+        elif isinstance(node, NonCaptureGroupNode):
+            dfs(node.expr)
 
-    elif isinstance(node, AltNode):
-        out_left = compute_init_sets(node.left, initalized_in)
-        out_right = compute_init_sets(node.right, initalized_in)
-        return out_left.intersection(out_right)
+    dfs(root)
+    return group_ast
 
-    elif isinstance(node, StarNode):
-        compute_init_sets(node.expr, initalized_in)
-        return initalized_in
 
-    elif isinstance(node, CaptureGroupNode):
-        new_in = compute_init_sets(node.expr, initalized_in)
-        new_out = set(new_in)
-        new_out.add(node.group_id)
-        return new_out
+def analyze_correctness(root):
+    group_ast = build_group_map(root)
+    memo = {}
+    context = set()
 
-    elif isinstance(node, NonCaptureGroupNode):
-        return compute_init_sets(node.expr, initalized_in)
+    def compute_out_set(node, in_set):
+        key = (id(node), frozenset(in_set))
+        if key in memo:
+            return memo[key]
 
-    elif isinstance(node, BackRefStringNode):
-        if node.group_id not in initalized_in:
-            raise ValueError(f"Ссылка на неинициализированную группу \\{node.group_id}")
-        return initalized_in
+        if key in context:
+            return in_set
 
-    elif isinstance(node, RecursiveRefNode):
-        k = node.group_id
-        if not initalized_in and k != 1:
-            raise ValueError(f"Рекурсивная ссылка (?{k}), но группа не объявлена/не инициализирована.")
-        return initalized_in
+        context.add(key)
 
-    else:
-        return initalized_in
+        if isinstance(node, CharNode):
+            res = set(in_set)
+
+        elif isinstance(node, BackRefStringNode):
+            if node.group_id not in in_set:
+                raise ValueError(
+                    f"Ссылка на неинициализированную группу \\{node.group_id}"
+                )
+            res = set(in_set)
+
+        elif isinstance(node, ConcatNode):
+            left_out = compute_out_set(node.left, in_set)
+            right_out = compute_out_set(node.right, left_out)
+            res = right_out
+
+        elif isinstance(node, AltNode):
+            left_out = compute_out_set(node.left, in_set)
+            right_out = compute_out_set(node.right, in_set)
+            res = left_out.intersection(right_out)
+
+        elif isinstance(node, StarNode):
+            _ = compute_out_set(node.expr, in_set)
+            res = set(in_set)
+
+        elif isinstance(node, CaptureGroupNode):
+            expr_out = compute_out_set(node.expr, in_set)
+            new_out = set(expr_out)
+            new_out.add(node.group_id)
+            res = new_out
+
+        elif isinstance(node, NonCaptureGroupNode):
+            res = compute_out_set(node.expr, in_set)
+
+        elif isinstance(node, RecursiveRefNode):
+            if node.group_id not in group_ast:
+                raise ValueError(
+                    f"Рекурсивная ссылка (?{node.group_id}), но группа не объявлена."
+                )
+            expr_for_k = group_ast[node.group_id]
+            sub_out = compute_out_set(expr_for_k, in_set)
+            res = sub_out
+
+        else:
+            res = set(in_set)
+
+        memo[key] = res
+        context.remove(key)
+        return res
+
+    try:
+        compute_out_set(root, frozenset())
+    except ValueError as e:
+        raise e
 
 
 def check_regex_correctness(regex_str):
@@ -284,27 +328,21 @@ def check_regex_correctness(regex_str):
         return f"Синтаксическая ошибка: {e}", None
 
     try:
-        compute_init_sets(ast_root, set())
+        analyze_correctness(ast_root)
     except ValueError as e:
         return f"Семантическая ошибка: {e}", None
 
     return "OK", ast_root
 
 
-tests = [
-    "(aa|bb)(?1)",
-    "(aa|bb)\\1",
-    "(a|(bb))(a|\\2)",
-    "(a(?1)b|c)",
-    "((a)|(b))*\\1",
-]
-
-
 if __name__ == "__main__":
-    reg = input()
-    verdict, tree = check_regex_correctness(reg)
-    print("Regex:", reg)
-    print("Verdict:", verdict)
-    if tree is not None:
-        print("AST:", tree)
-    print("-" * 40)
+    while True:
+        reg = input("Введите регэкс (пустая строка => выход): ")
+        if not reg.strip():
+            break
+        verdict, tree = check_regex_correctness(reg)
+        print("Regex:", reg)
+        print("Verdict:", verdict)
+        if tree is not None:
+            print("AST:", tree)
+        print("-" * 40)
