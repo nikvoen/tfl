@@ -195,18 +195,39 @@ class Parser:
                     self.eat('NON_CAPT_GROUP')
                     expr = self.parse_alt()
                     self.eat('RPAREN')
-                    return NonCaptureGroupNode(expr)
+
+                    group_node = NonCaptureGroupNode(expr)
+                    while self.current_token().kind == 'STAR':
+                        self.eat('STAR')
+                        group_node = StarNode(group_node)
+
+                    return group_node
+
                 else:
                     digit_token = self.eat('DIGIT')
                     group_id = int(digit_token.value)
                     self.eat('RPAREN')
+                    while self.current_token().kind == 'STAR':
+                        self.eat('STAR')
+                        return StarNode(RecursiveRefNode(group_id))
                     return RecursiveRefNode(group_id)
             else:
                 self.current_group_id += 1
+                if self.current_group_id > 9:
+                    raise ValueError(
+                        f"Слишком много групп захвата: {self.current_group_id}, допустимо не более {9}"
+                    )
                 group_id = self.current_group_id
+
                 expr = self.parse_alt()
                 self.eat('RPAREN')
-                return CaptureGroupNode(group_id, expr)
+
+                group_node = CaptureGroupNode(group_id, expr)
+                while self.current_token().kind == 'STAR':
+                    self.eat('STAR')
+                    group_node = StarNode(group_node)
+
+                return group_node
 
         elif t.kind == 'BACKSLASH_DIGIT':
             self.eat('BACKSLASH_DIGIT')
@@ -248,10 +269,39 @@ def build_group_map(root):
     return group_ast
 
 
+def collect_optional_groups(root):
+    optional_groups = set()
+
+    def dfs(node, star_context=False):
+        if isinstance(node, CaptureGroupNode):
+            if star_context:
+                optional_groups.add(node.group_id)
+            dfs(node.expr, star_context)
+
+        elif isinstance(node, ConcatNode):
+            dfs(node.left, star_context)
+            dfs(node.right, star_context)
+
+        elif isinstance(node, AltNode):
+            dfs(node.left, star_context)
+            dfs(node.right, star_context)
+
+        elif isinstance(node, StarNode):
+            dfs(node.expr, True)
+
+        elif isinstance(node, NonCaptureGroupNode):
+            dfs(node.expr, star_context)
+
+    dfs(root, star_context=False)
+    return optional_groups
+
+
 def analyze_correctness(root):
     group_ast = build_group_map(root)
     memo = {}
     context = set()
+
+    optional_groups = collect_optional_groups(root)
 
     def compute_out_set(node, in_set):
         key = (id(node), frozenset(in_set))
@@ -267,7 +317,7 @@ def analyze_correctness(root):
             res = set(in_set)
 
         elif isinstance(node, BackRefStringNode):
-            if node.group_id not in in_set:
+            if node.group_id in optional_groups or node.group_id not in in_set:
                 raise ValueError(
                     f"Ссылка на неинициализированную группу \\{node.group_id}"
                 )
@@ -335,9 +385,100 @@ def check_regex_correctness(regex_str):
     return "OK", ast_root
 
 
+def build_grammar_from_ast(ast_root):
+    grammar = {}
+    built_nonterminals = set()
+    star_counter = [0]
+
+    def get_nonterminal_name(gid):
+        return f"S{gid}"
+
+    def new_star_nonterminal():
+        idx = star_counter[0]
+        star_counter[0] += 1
+        return f"R{idx}"
+
+    def build_rule_for_group(gid, node):
+        nonterm = get_nonterminal_name(gid)
+        if nonterm in built_nonterminals:
+            return
+        built_nonterminals.add(nonterm)
+
+        alts = build_alternatives(node, nonterm)
+        grammar[nonterm] = alts
+
+    def build_star_alternatives(node, star_nt):
+        expr_alts = build_alternatives(node, star_nt)
+        result = [[]]
+        for alt in expr_alts:
+            result.append(alt + [star_nt])
+        return result
+
+    def build_alternatives(node, current_nt):
+        if isinstance(node, CharNode):
+            return [[node.ch]]
+
+        elif isinstance(node, ConcatNode):
+            left_alts = build_alternatives(node.left, current_nt)
+            right_alts = build_alternatives(node.right, current_nt)
+            result = []
+            for la in left_alts:
+                for ra in right_alts:
+                    result.append(la + ra)
+            return result
+
+        elif isinstance(node, AltNode):
+            left_alts = build_alternatives(node.left, current_nt)
+            right_alts = build_alternatives(node.right, current_nt)
+            return left_alts + right_alts
+
+        elif isinstance(node, StarNode):
+            star_nt = new_star_nonterminal()
+            if star_nt not in built_nonterminals:
+                built_nonterminals.add(star_nt)
+                grammar[star_nt] = build_star_alternatives(node.expr, star_nt)
+            return [[star_nt]]
+
+        elif isinstance(node, CaptureGroupNode):
+            build_rule_for_group(node.group_id, node.expr)
+            return [[get_nonterminal_name(node.group_id)]]
+
+        elif isinstance(node, NonCaptureGroupNode):
+            return build_alternatives(node.expr, current_nt)
+
+        elif isinstance(node, BackRefStringNode):
+            return [[get_nonterminal_name(node.group_id)]]
+
+        elif isinstance(node, RecursiveRefNode):
+            return [[get_nonterminal_name(node.group_id)]]
+
+        else:
+            return [["???"]]
+
+    grammar["S0"] = build_alternatives(ast_root, "S0")
+
+    return grammar
+
+
+def print_cfg_skeleton(rules):
+    print("КC грамматика (каркас):")
+    sorted_nts = sorted(rules.keys(), key=lambda x: (
+        999999 if not x[1:].isdigit() else int(x[1:])
+    ))
+
+    for nt in sorted_nts:
+        alts_str = []
+        for alt in rules[nt]:
+            if alt:
+                alts_str.append(" ".join(alt))
+            else:
+                alts_str.append("ε")
+        print(f"{nt} -> {' | '.join(alts_str)}")
+
+
 if __name__ == "__main__":
     while True:
-        reg = input("Введите регэкс (пустая строка => выход): ")
+        reg = input("Введите регекс (пустая строка => выход): ")
         if not reg.strip():
             break
         verdict, tree = check_regex_correctness(reg)
@@ -345,4 +486,8 @@ if __name__ == "__main__":
         print("Verdict:", verdict)
         if tree is not None:
             print("AST:", tree)
+
+            cfg = build_grammar_from_ast(tree)
+            print_cfg_skeleton(cfg)
+
         print("-" * 40)
