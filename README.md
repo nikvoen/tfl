@@ -1,5 +1,5 @@
-### Lab work #2
-branch: fix_network
+## Lab work 2
+branch: [maze](https://github.com/nikvoen/tfl/tree/maze)
 
-### Lab work #4
-branch: regex
+## Lab work 4
+branch: [regex](https://github.com/nikvoen/tfl/tree/regex)
